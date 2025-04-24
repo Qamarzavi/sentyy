@@ -35,7 +35,7 @@ st.markdown("""
 # Sentiment analysis logic (ported from JavaScript)
 def analyze_sentiment(text):
     positive_words = ['happy', 'great', 'awesome', 'love', 'excellent', 'joyful']
-    negative_words = ['sad', 'bad', 'terrible', 'hate', 'awful', 'angry']
+    negative_words = ['sad', 'bad', 'terrible', 'kill', 'hate', 'awful', 'angry']
     emotion_map = {
         'joy': ['happy', 'awesome', 'love', 'excellent'],
         'anger': ['hate', 'angry', 'terrible'],
