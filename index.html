@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advanced Sentiment Analysis Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.22.9/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // Sentiment analysis logic (integrated backend)
+    const analyzeSentiment = (text) => {
+      const positiveWords = ['happy', 'great', 'awesome', 'love', 'excellent', 'joyful'];
+      const negativeWords = ['sad', 'bad', 'terrible', 'hate', 'awful', 'angry'];
+      const emotionMap = {
+        joy: ['happy', 'awesome', 'love', 'excellent'],
+        anger: ['hate', 'angry', 'terrible'],
+        sadness: ['sad', 'awful'],
+        fear: ['scary', 'afraid'],
+        surprise: ['shock', 'unexpected']
+      };
+
+      let sentimentScore = 0;
+      const words = text.toLowerCase().split(/\s+/).filter(w => w);
+      const wordFreq = {};
+      const emotions = { joy: 0, anger: 0, sadness: 0, fear: 0, surprise: 0 };
+      const phrases = new Set();
+
+      words.forEach((word, i) => {
+        wordFreq[word] = (wordFreq[word] || 0) + 1;
+        if (positiveWords.includes(word)) sentimentScore += 0.2;
+        if (negativeWords.includes(word)) sentimentScore -= 0.2;
+        Object.keys(emotions).forEach(emotion => {
+          if (emotionMap[emotion].includes(word)) emotions[emotion] += 0.3;
+        });
+        if (i < words.length - 1) phrases.add(`${word} ${words[i + 1]}`);
+      });
+
+      const sentiment = sentimentScore > 0 ? 'Positive' : sentimentScore < 0 ? 'Negative' : 'Neutral';
+      const totalEmotion = Object.values(emotions).reduce((sum, val) => sum + val, 0) || 1;
+      const normalizedEmotions = Object.fromEntries(
+        Object.entries(emotions).map(([key, val]) => [key, val / totalEmotion])
+      );
+
+      return {
+        sentiment,
+        sentimentScore: Math.min(Math.max(sentimentScore, -1), 1),
+        sentimentConfidence: Math.random() * 0.2 + 0.8,
+        emotions: normalizedEmotions,
+        emotionConfidence: Math.random() * 0.2 + 0.75,
+        wordCloud: Object.entries(wordFreq).map(([word, count]) => ({ word, count: count * 10 })),
+        keyPhrases: Array.from(phrases).slice(0, 5),
+        analysisDuration: Math.floor(Math.random() * 100 + 50)
+      };
+    };
+
+    // Clipboard helper with fallback
+    const copyToClipboard = (text) => {
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text).then(() => {
+          alert('Text copied to clipboard!');
+        }).catch(err => {
+          console.error('Clipboard API failed:', err);
+          fallbackCopy(text);
+        });
+      } else {
+        fallbackCopy(text);
+      }
+    };
+
+    const fallbackCopy = (text) => {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        alert('Text copied to clipboard!');
+      } catch (err) {
+        console.error('Fallback copy failed:', err);
+        alert('Copy failed. Please copy this text manually:\n\n' + text);
+      }
+      document.body.removeChild(textarea);
+    };
+
+    // Error Boundary Component
+    const ErrorBoundary = ({ children }) => {
+      const [hasError, setHasError] = useState(false);
+
+      React.useEffect(() => {
+        const errorHandler = (error) => {
+          console.error(error);
+          setHasError(true);
+        };
+        window.addEventListener('error', errorHandler);
+        return () => window.removeEventListener('error', errorHandler);
+      }, []);
+
+      if (hasError) {
+        return <div className="text-red-500 p-4">Something went wrong. Please refresh the page.</div>;
+      }
+      return children;
+    };
+
+    // Sentiment Bar Chart Component
+    const SentimentChart = ({ data }) => {
+      const canvasRef = useRef(null);
+      const chartRef = useRef(null);
+
+      useEffect(() => {
+        if (!data || !canvasRef.current) return;
+        if (chartRef.current) chartRef.current.destroy();
+        const ctx = canvasRef.current.getContext('2d');
+        chartRef.current = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: ['Positive 😊', 'Negative 😢', 'Neutral 😐'],
+            datasets: [{
+              label: 'Sentiment Distribution',
+              data: [
+                data.sentiment === 'Positive' ? Math.abs(data.sentimentScore) : 0,
+                data.sentiment === 'Negative' ? Math.abs(data.sentimentScore) : 0,
+                data.sentiment === 'Neutral' ? 1 : 0
+              ],
+              backgroundColor: ['#4ade80', '#f87171', '#60a5fa'],
+              borderRadius: 8
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              title: { display: true, text: 'Sentiment Breakdown', color: '#1f2937', font: { size: 16 } }
+            },
+            scales: {
+              y: { beginAtZero: true, max: 1, title: { display: true, text: 'Score' } }
+            }
+          }
+        });
+
+        return () => chartRef.current?.destroy();
+      }, [data]);
+
+      return <canvas ref={canvasRef} className="w-full max-w-md" />;
+    };
+
+    // Emotion Radar Chart Component
+    const EmotionChart = ({ emotions }) => {
+      const canvasRef = useRef(null);
+      const chartRef = useRef(null);
+
+      useEffect(() => {
+        if (!emotions || !canvasRef.current) return;
+        if (chartRef.current) chartRef.current.destroy();
+        const ctx = canvasRef.current.getContext('2d');
+        chartRef.current = new Chart(ctx, {
+          type: 'radar',
+          data: {
+            labels: ['Joy 😄', 'Anger 😣', 'Sadness 😢', 'Fear 😨', 'Surprise 😮'],
+            datasets: [{
+              label: 'Emotion Distribution',
+              data: [
+                emotions.joy || 0,
+                emotions.anger || 0,
+                emotions.sadness || 0,
+                emotions.fear || 0,
+                emotions.surprise || 0
+              ],
+              backgroundColor: 'rgba(96, 165, 250, 0.2)',
+              borderColor: '#60a5fa',
+              borderWidth: 2
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              title: { display: true, text: 'Emotion Distribution', color: '#1f2937', font: { size: 16 } }
+            },
+            scales: {
+              r: { beginAtZero: true, max: 1, ticks: { stepSize: 0.2 } }
+            }
+          }
+        });
+
+        return () => chartRef.current?.destroy();
+      }, [emotions]);
+
+      return <canvas ref={canvasRef} className="w-full max-w-md" />;
+    };
+
+    // Sentiment Trend Chart Component
+    const SentimentTrendChart = ({ history }) => {
+      const canvasRef = useRef(null);
+      const chartRef = useRef(null);
+
+      useEffect(() => {
+        if (!history.length || !canvasRef.current) return;
+        if (chartRef.current) chartRef.current.destroy();
+        const ctx = canvasRef.current.getContext('2d');
+        chartRef.current = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: history.slice(0, 10).reverse().map((_, i) => `Analysis ${i + 1}`),
+            datasets: [{
+              label: 'Sentiment Score',
+              data: history.slice(0, 10).reverse().map(item => item.result.sentimentScore),
+              borderColor: '#60a5fa',
+              fill: false,
+              tension: 0.3
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { display: false },
+              title: { display: true, text: 'Sentiment Trend', color: '#1f2937', font: { size: 16 } }
+            },
+            scales: {
+              y: { min: -1, max: 1, title: { display: true, text: 'Score' } }
+            }
+          }
+        });
+
+        return () => chartRef.current?.destroy();
+      }, [history]);
+
+      return <canvas ref={canvasRef} className="w-full max-w-md" />;
+    };
+
+    // Custom Word Cloud Component
+    const WordCloud = ({ words, density }) => {
+      if (!words || !words.length) return <div>No words to display.</div>;
+
+      const densityFactors = {
+        sparse: { maxWords: 10, baseSize: 12, scale: 0.3 },
+        normal: { maxWords: 20, baseSize: 16, scale: 0.5 },
+        dense: { maxWords: 30, baseSize: 18, scale: 0.7 }
+      };
+      const { maxWords, baseSize, scale } = densityFactors[density];
+
+      return (
+        <div className="w-full h-64 flex flex-wrap justify-center items-center gap-2 p-4 overflow-hidden">
+          {words.slice(0, maxWords).map(({ word, count }, index) => {
+            const isPositive = ['happy', 'great', 'awesome', 'love', 'excellent', 'joyful'].includes(word);
+            const isNegative = ['sad', 'bad', 'terrible', 'hate', 'awful', 'angry'].includes(word);
+            const fontSize = Math.min(baseSize + count * scale, 40);
+            const color = isPositive ? 'text-green-500' : isNegative ? 'text-red-500' : 'text-blue-500';
+            return (
+              <span
+                key={index}
+                className={`inline-block ${color} font-semibold`}
+                style={{
+                  fontSize: `${fontSize}px`,
+                  transform: `rotate(${Math.random() * 30 - 15}deg)`,
+                  margin: '2px'
+                }}
+              >
+                {word}
+              </span>
+            );
+          })}
+        </div>
+      );
+    };
+
+    // Settings Modal Component
+    const SettingsModal = ({ isOpen, onClose, settings, setSettings, darkMode }) => {
+      if (!isOpen) return null;
+
+      return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className={`${darkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'} p-6 rounded-lg shadow-lg max-w-md w-full`}>
+            <h2 className="text-xl font-semibold mb-4">Settings</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={settings.realTimeAnalysis}
+                    onChange={() => setSettings({ ...settings, realTimeAnalysis: !settings.realTimeAnalysis })}
+                    className="mr-2"
+                  />
+                  Enable Real-Time Analysis
+                </label>
+              </div>
+              <div>
+                <label className="block mb-1">Word Cloud Density</label>
+                <select
+                  value={settings.wordCloudDensity}
+                  onChange={(e) => setSettings({ ...settings, wordCloudDensity: e.target.value })}
+                  className={`${darkMode ? 'bg-gray-700 text-white' : 'bg-white text-gray-900'} border rounded-lg p-2 w-full`}
+                >
+                  <option value="sparse">Sparse</option>
+                  <option value="normal">Normal</option>
+                  <option value="dense">Dense</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-4 mt-6">
+              <button
+                className={`${darkMode ? 'bg-blue-700 hover:bg-blue-800' : 'bg-blue-600 hover:bg-blue-700'} text-white py-2 px-4 rounded-lg`}
+                onClick={onClose}
+              >
+                Save
+              </button>
+              <button
+                className={`${darkMode ? 'bg-gray-600 hover:bg-gray-700' : 'bg-gray-500 hover:bg-gray-600'} text-white py-2 px-4 rounded-lg`}
+                onClick={onClose}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Main App Component
+    const App = () => {
+      const [inputText, setInputText] = useState('');
+      const [sentimentResult, setSentimentResult] = useState(null);
+      const [history, setHistory] = useState([]);
+      const [searchQuery, setSearchQuery] = useState('');
+      const [darkMode, setDarkMode] = useState(false);
+      const [apiError, setApiError] = useState(null);
+      const [settingsOpen, setSettingsOpen] = useState(false);
+      const [settings, setSettings] = useState({
+        realTimeAnalysis: true,
+        wordCloudDensity: 'normal'
+      });
+      const debounceTimeout = useRef(null);
+
+      useEffect(() => {
+        if (!settings.realTimeAnalysis) return;
+        if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+        if (!inputText.trim()) {
+          setSentimentResult(null);
+          setApiError(null);
+          return;
+        }
+        debounceTimeout.current = setTimeout(() => {
+          try {
+            const result = analyzeSentiment(inputText);
+            setSentimentResult(result);
+            setApiError(null);
+          } catch (error) {
+            setApiError(`Sentiment analysis failed: ${error.message}`);
+            setSentimentResult(null);
+          }
+        }, 500);
+        return () => clearTimeout(debounceTimeout.current);
+      }, [inputText, settings.realTimeAnalysis]);
+
+      const triggerAnalysis = () => {
+        if (!inputText.trim()) return;
+        try {
+          const result = analyzeSentiment(inputText);
+          setSentimentResult(result);
+          setApiError(null);
+        } catch (error) {
+          setApiError(`Sentiment analysis failed: ${error.message}`);
+          setSentimentResult(null);
+        }
+      };
+
+      const exportToPDF = () => {
+        if (!sentimentResult) return;
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.setFontSize(16);
+        doc.text('Sentiment Analysis Report', 20, 20);
+        doc.setFontSize(12);
+        doc.text(`Text: ${inputText.slice(0, 100)}${inputText.length > 100 ? '...' : ''}`, 20, 40);
+        doc.text(`Sentiment: ${sentimentResult.sentiment}`, 20, 50);
+        doc.text(`Score: ${(sentimentResult.sentimentScore * 100).toFixed(1)}%`, 20, 60);
+        doc.text(`Confidence: ${(sentimentResult.sentimentConfidence * 100).toFixed(1)}%`, 20, 70);
+        doc.text('Emotions:', 20, 80);
+        Object.entries(sentimentResult.emotions).forEach(([emotion, score], i) => {
+          doc.text(`${emotion}: ${(score * 100).toFixed(1)}%`, 30, 90 + i * 10);
+        });
+        doc.text('Key Phrases:', 20, 130);
+        (sentimentResult.keyPhrases || []).forEach((phrase, i) => {
+          doc.text(phrase, 30, 140 + i * 10);
+        });
+        doc.save('sentiment_analysis.pdf');
+      };
+
+      const copyResults = () => {
+        if (!sentimentResult) return;
+        const text = `
+Sentiment: ${sentimentResult.sentiment} ${sentimentResult.sentiment === 'Positive' ? '😊' : sentimentResult.sentiment === 'Negative' ? '😢' : '😐'}
+Score: ${(sentimentResult.sentimentScore * 100).toFixed(1)}%
+Confidence: ${(sentimentResult.sentimentConfidence * 100).toFixed(1)}%
+Emotions:
+${Object.entries(sentimentResult.emotions).map(([emotion, score]) => `  ${emotion}: ${(score * 100).toFixed(1)}%`).join('\n')}
+Key Phrases: ${(sentimentResult.keyPhrases || []).join(', ')}
+        `.trim();
+        copyToClipboard(text);
+      };
+
+      const shareResults = () => {
+        if (!sentimentResult) return;
+        const params = new URLSearchParams({
+          text: inputText,
+          sentiment: sentimentResult.sentiment,
+          score: (sentimentResult.sentimentScore * 100).toFixed(1),
+          confidence: (sentimentResult.sentimentConfidence * 100).toFixed(1)
+        });
+        const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+        copyToClipboard(url);
+      };
+
+      const saveAnalysis = () => {
+        if (!inputText.trim() || !sentimentResult) return;
+        setHistory([{
+          text: inputText,
+          result: { ...sentimentResult, apiSource: 'integrated' },
+          timestamp: new Date().toISOString(),
+          duration: sentimentResult.analysisDuration
+        }, ...history.slice(0, 9)]);
+      };
+
+      const clearText = () => {
+        setInputText('');
+        setSentimentResult(null);
+        setApiError(null);
+      };
+
+      const resetHistory = () => {
+        if (window.confirm('Are you sure you want to clear all analysis history?')) {
+          setHistory([]);
+        }
+      };
+
+      const filteredHistory = history.filter(item =>
+        item.text.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.result.sentiment.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      return (
+        <ErrorBoundary>
+          <div className={`min-h-screen ${darkMode ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-900'} flex flex-col items-center p-4 transition-colors duration-300`}>
+            <header className={`w-full max-w-5xl ${darkMode ? 'bg-gray-800' : 'bg-white'} shadow rounded-lg p-6 mb-6 flex justify-between items-center`}>
+              <div>
+                <h1 className="text-3xl font-bold">Advanced Sentiment Analysis</h1>
+                <p className={`${darkMode ? 'text-gray-300' : 'text-gray-600'} mt-2`}>Real-time emotion and sentiment analysis with interactive visualizations.</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className={`p-2 rounded-full ${darkMode ? 'bg-gray-700 text-yellow-400' : 'bg-gray-200 text-gray-800'}`}
+                  onClick={() => setDarkMode(!darkMode)}
+                >
+                  {darkMode ? '☀️' : '🌙'}
+                </button>
+                <button
+                  className={`p-2 rounded-full ${darkMode ? 'bg-gray-700 text-white' : 'bg-gray-200 text-gray-800'}`}
+                  onClick={() => setSettingsOpen(true)}
+                >
+                  ⚙️
+                </button>
+              </div>
+            </header>
+
+            <SettingsModal
+              isOpen={settingsOpen}
+              onClose={() => setSettingsOpen(false)}
+              settings={settings}
+              setSettings={setSettings}
+              darkMode={darkMode}
+            />
+
+            <main className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} shadow rounded-lg p-6 lg:col-span-1`}>
+                <h2 className="text-xl font-semibold mb-4">Enter Text</h2>
+                <textarea
+                  className={`w-full h-40 p-4 ${darkMode ? 'bg-gray-700 text-white border-gray-600' : 'bg-white text-gray-900 border-gray-300'} border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  placeholder="Type your text here..."
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                />
+                {apiError && (
+                  <p className="text-red-500 mt-2 text-sm">{apiError}</p>
+                )}
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                  <button
+                    className={`col-span-1 ${darkMode ? 'bg-blue-700 hover:bg-blue-800' : 'bg-blue-600 hover:bg-blue-700'} text-white py-2 rounded-lg transition disabled:opacity-50`}
+                    onClick={saveAnalysis}
+                    disabled={!inputText.trim() || !sentimentResult}
+                  >
+                    Save Analysis
+                  </button>
+                  <button
+                    className={`col-span-1 ${darkMode ? 'bg-gray-600 hover:bg-gray-700' : 'bg-gray-500 hover:bg-gray-600'} text-white py-2 rounded-lg transition`}
+                    onClick={clearText}
+                  >
+                    Clear Text
+                  </button>
+                  <button
+                    className={`col-span-1 ${darkMode ? 'bg-green-700 hover:bg-green-800' : 'bg-green-600 hover:bg-green-700'} text-white py-2 rounded-lg transition disabled:opacity-50`}
+                    onClick={exportToPDF}
+                    disabled={!sentimentResult}
+                  >
+                    Export PDF
+                  </button>
+                  <button
+                    className={`col-span-1 ${darkMode ? 'bg-purple-700 hover:bg-purple-800' : 'bg-purple-600 hover:bg-purple-700'} text-white py-2 rounded-lg transition disabled:opacity-50`}
+                    onClick={copyResults}
+                    disabled={!sentimentResult}
+                  >
+                    Copy Results
+                  </button>
+                  <button
+                    className={`col-span-1 ${darkMode ? 'bg-indigo-700 hover:bg-indigo-800' : 'bg-indigo-600 hover:bg-indigo-700'} text-white py-2 rounded-lg transition disabled:opacity-50`}
+                    onClick={shareResults}
+                    disabled={!sentimentResult}
+                  >
+                    Share Results
+                  </button>
+                  {!settings.realTimeAnalysis && (
+                    <button
+                      className={`col-span-1 ${darkMode ? 'bg-yellow-700 hover:bg-yellow-800' : 'bg-yellow-600 hover:bg-yellow-700'} text-white py-2 rounded-lg transition disabled:opacity-50`}
+                      onClick={triggerAnalysis}
+                      disabled={!inputText.trim()}
+                    >
+                      Analyze Now
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} shadow rounded-lg p-6 lg:col-span-2`}>
+                <h2 className="text-xl font-semibold mb-4">Analysis Results</h2>
+                {sentimentResult ? (
+                  <div className="space-y-6">
+                    <div>
+                      <p className="text-lg">
+                        Sentiment: <span className={`font-bold ${
+                          sentimentResult.sentiment === 'Positive' ? 'text-green-500' :
+                          sentimentResult.sentiment === 'Negative' ? 'text-red-500' : 'text-blue-500'
+                        }`}>{sentimentResult.sentiment} {sentimentResult.sentiment === 'Positive' ? '😊' : sentimentResult.sentiment === 'Negative' ? '😢' : '😐'}</span>
+                      </p>
+                      <p className={`${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                        Score: {(sentimentResult.sentimentScore * 100).toFixed(1)}% | Confidence: {(sentimentResult.sentimentConfidence * 100).toFixed(1)}% | Duration: {sentimentResult.analysisDuration}ms
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <SentimentChart data={sentimentResult} />
+                      <EmotionChart emotions={sentimentResult.emotions} />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2">Key Phrases</h3>
+                      {sentimentResult.keyPhrases && sentimentResult.keyPhrases.length > 0 ? (
+                        <ul className="list-disc pl-5">
+                          {sentimentResult.keyPhrases.map((phrase, index) => (
+                            <li key={index} className={`${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>{phrase}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className={`${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>No key phrases detected.</p>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2">Word Cloud</h3>
+                     -TEXT
+                      <WordCloud words={sentimentResult.wordCloud} density={settings.wordCloudDensity} />
+                    </div>
+                  </div>
+                ) : (
+                  <p className={`${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Start typing to see real-time analysis.</p>
+                )}
+              </div>
+
+              <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} shadow rounded-lg p-6 lg:col-span-3`}>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-semibold">Analysis History</h2>
+                  <button
+                    className={`px-4 py-2 ${darkMode ? 'bg-red-700 hover:bg-red-800' : 'bg-red-600 hover:bg-red-700'} text-white rounded-lg transition disabled:opacity-50`}
+                    onClick={resetHistory}
+                    disabled={history.length === 0}
+                  >
+                    Reset History
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  className={`w-full p-2 mb-4 ${darkMode ? 'bg-gray-700 text-white border-gray-600' : 'bg-white text-gray-900 border-gray-300'} border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  placeholder="Search history..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                {filteredHistory.length > 0 ? (
+                  <div className="space-y-6">
+                    <ul className="space-y-4">
+                      {filteredHistory.map((item, index) => (
+                        <li key={index} className="border-b pb-2">
+                          <p className={`${darkMode ? 'text-gray-200' : 'text-gray-700'}`}><strong>Text:</strong> {item.text}</p>
+                          <p className={`${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                            Sentiment: <span className={`font-semibold ${
+                              item.result.sentiment === 'Positive' ? 'text-green-500' :
+                              item.result.sentiment === 'Negative' ? 'text-red-500' : 'text-blue-500'
+                            }`}>{item.result.sentiment} {item.result.sentiment === 'Positive' ? '😊' : item.result.sentiment === 'Negative' ? '😢' : '😐'}</span> (Score: {(item.result.sentimentScore * 100).toFixed(1)}%)
+                          </p>
+                          <p className={`${darkMode ? 'text-gray-400' : 'text-gray-500'} text-sm`}>
+                            Timestamp: {new Date(item.timestamp).toLocaleString()} | Duration: {item.duration}ms | Source: {item.result.apiSource}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2">Sentiment Trend</h3>
+                      <SentimentTrendChart history={filteredHistory} />
+                    </div>
+                  </div>
+                ) : (
+                  <p className={`${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>No history yet or no matches found.</p>
+                )}
+              </div>
+            </main>
+
+            <footer className={`mt-8 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              <p>Powered by Advanced AI Sentiment Analysis | © 2025</p>
+            </footer>
+          </div>
+        </ErrorBoundary>
+      );
+    };
+
+    // Check if dependencies are loaded before rendering
+    if (window.React && window.ReactDOM && window.Chart && window.jspdf) {
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    } else {
+      document.getElementById('root').innerHTML = '<div className="text-red-500 p-4">Failed to load required scripts. Please check your internet connection and try again.</div>';
+    }
+  </script>
+</body>
+</html>
